@@ -222,10 +222,17 @@
 
 import React, { useState, useEffect } from 'react';
 import { Button, TextField, CircularProgress, Container, Typography, Paper, Grid } from '@mui/material';
+import { gapi } from 'gapi-script';
 
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbx8TXQuVtfER7tiJy-rL8n8jby9qztf7lelgalqM0rVEuxd4prVIVMVmvU7NJ7He_FW/exec'; // Replace with your Google Apps Script Web App URL
+// Replace with your client ID and spreadsheet ID
+const CLIENT_ID = '951840937495-47jfc42fiit1031u1a9kp70o2v4sftei.apps.googleusercontent.com';
+// const SPREADSHEET_ID = '1W25bBPekgh4yJyTaBGUMOv7Cy3LWl0d-zSy1jUjkzIE';
+const API_KEY = 'AIzaSyDdlWa9ZHEIFJ_rmZAlZkvEEdCP96x3FdQ'; // Replace with your API key
 
-function App() {
+const DISCOVERY_DOC = 'https://sheets.googleapis.com/$discovery/rest?version=v4';
+const SCOPES = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+
+const App = () => {
   const [idNo, setIdNo] = useState('');
   const [name, setName] = useState('');
   const [oldBalance, setOldBalance] = useState('');
@@ -234,8 +241,42 @@ function App() {
   const [bank, setBank] = useState('');
   const [total, setTotal] = useState(0);
   const [error, setError] = useState('');
+  const [bill,setBill]=useState('');
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+
+  useEffect(() => {
+    const handleClientLoad = () => {
+      gapi.load('client:auth2', initializeGapiClient);
+    };
+
+    const initializeGapiClient = async () => {
+      await gapi.client.init({
+        apiKey: API_KEY,
+        discoveryDocs: [DISCOVERY_DOC],
+      });
+      gapi.auth2.init({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+      });
+      setIsAuthorized(gapi.auth2.getAuthInstance().isSignedIn.get());
+    };
+
+    handleClientLoad();
+  }, []);
+
+  const handleAuthClick = () => {
+    gapi.auth2.getAuthInstance().signIn().then(() => {
+      setIsAuthorized(true);
+    });
+  };
+
+  const handleSignoutClick = () => {
+    gapi.auth2.getAuthInstance().signOut().then(() => {
+      setIsAuthorized(false);
+    });
+  };
 
   const handleSearch = async () => {
     setError('');
@@ -244,16 +285,19 @@ function App() {
     setLoading(true);
 
     try {
-      const response = await fetch(`${APPS_SCRIPT_URL}?idNo=${encodeURIComponent(idNo)}`);
-      const data = await response.json();
-      
-      console.log('API response:', data); // Log the API response for debugging
-      
-      if (data.error) {
-        setError(data.error);
+      const response = await gapi.client.sheets.spreadsheets.values.get({
+        spreadsheetId: '1W25bBPekgh4yJyTaBGUMOv7Cy3LWl0d-zSy1jUjkzIE',
+        range: 'Name!A:E',
+      });
+
+      const data = response.result.values || [];
+      const row = data.find(row => row[0] === idNo);
+
+      if (row) {
+        setName(row[2] || '');
+        setOldBalance(row[4] || '');
       } else {
-        setName(data.values[idNo][2] || '');
-        setOldBalance(data.values[idNo][4] || '');
+        setError('No data found for the provided ID.');
       }
     } catch (error) {
       setError(`Error fetching data: ${error.message}`);
@@ -268,53 +312,42 @@ function App() {
     setTotal(totalAmount);
   };
 
-  useEffect(() => {
-    calculateTotal();
-  }, [oldBalance, credit, cash, bank]);
-
   const handleSubmit = async () => {
     setSubmitting(true);
     setError('');
-  
+
     try {
-      const data = {
-        date: new Date().toLocaleDateString(),
-        idNo,
-        name,
-        oldBalance,
-        credit,
-        cash,
-        bank,
-        total,
-      };
-  
-      console.log('Data being sent:', data); // Log data for debugging
-  
-      const response = await fetch('https://script.google.com/macros/s/AKfycbx8TXQuVtfER7tiJy-rL8n8jby9qztf7lelgalqM0rVEuxd4prVIVMVmvU7NJ7He_FW/exec', {
-    
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+      const data = [
+        [bill,new Date().toLocaleDateString(),bill,idNo, name, oldBalance, credit, cash, bank, total]
+      ];
+
+      const request = {
+        spreadsheetId: '1W25bBPekgh4yJyTaBGUMOv7Cy3LWl0d-zSy1jUjkzIE',
+        range: 'sheet!B:J', // Adjust range as needed
+        valueInputOption: 'RAW',
+        resource: {
+          values: data,
         },
-        body: JSON.stringify(data),
-      });
-  
-      const result = await response.json();
-      console.log('Submit response:', result); // Log the submit response for debugging
-      
-      if (response.ok) {
+      };
+
+      const response = await gapi.client.sheets.spreadsheets.values.append(request);
+      console.log('Submit response:', response.result);
+
+      if (response.status === 200) {
         alert('Data submitted successfully!');
       } else {
-        throw new Error(result.error || 'Error submitting data.');
+        throw new Error('Error submitting data.');
       }
     } catch (error) {
       setError(`Error submitting data: ${error.message}`);
-      console.log('Error submitting data:', error.message);
     } finally {
       setSubmitting(false);
     }
   };
-  
+
+  useEffect(() => {
+    calculateTotal();
+  }, [oldBalance, credit, cash, bank]);
 
   return (
     <Container component="main" maxWidth="xs">
@@ -322,7 +355,30 @@ function App() {
         <Typography component="h1" variant="h5" style={{ marginBottom: '2rem', textAlign: 'center' }}>
           MAHALAKSHMI STORES
         </Typography>
-        <Grid container spacing={2}>
+        {!isAuthorized ? (
+          <div>
+            <Button
+              variant="contained"
+              color="primary"
+              fullWidth
+              onClick={handleAuthClick}
+            >
+              Authorize
+            </Button>
+          </div>
+        ) : (
+          <div>
+            <Button
+              variant="contained"
+              color="secondary"
+              fullWidth
+              onClick={handleSignoutClick}
+            >
+              Sign Out
+            </Button>
+          </div>
+        )}
+        <Grid container spacing={2} style={{ marginTop: '2rem' }}>
           <Grid item xs={12}>
             <TextField
               variant="outlined"
@@ -341,7 +397,7 @@ function App() {
               label="ID_NO"
               value={idNo}
               onChange={(e) => setIdNo(e.target.value)}
-              disabled={loading}
+              disabled={loading || !isAuthorized}
             />
           </Grid>
           <Grid item xs={12}>
@@ -350,7 +406,7 @@ function App() {
               color="primary"
               fullWidth
               onClick={handleSearch}
-              disabled={loading}
+              disabled={loading || !isAuthorized}
             >
               {loading ? <CircularProgress size={24} /> : 'Search'}
             </Button>
@@ -385,7 +441,7 @@ function App() {
               label="CREDIT"
               value={credit}
               onChange={(e) => setCredit(e.target.value)}
-              disabled={loading}
+              disabled={loading || !isAuthorized}
             />
           </Grid>
           <Grid item xs={12}>
@@ -396,7 +452,7 @@ function App() {
               label="CASH"
               value={cash}
               onChange={(e) => setCash(e.target.value)}
-              disabled={loading}
+              disabled={loading || !isAuthorized}
             />
           </Grid>
           <Grid item xs={12}>
@@ -407,7 +463,7 @@ function App() {
               label="BANK"
               value={bank}
               onChange={(e) => setBank(e.target.value)}
-              disabled={loading}
+              disabled={loading || !isAuthorized}
             />
           </Grid>
           <Grid item xs={12}>
@@ -427,7 +483,7 @@ function App() {
               color="secondary"
               fullWidth
               onClick={handleSubmit}
-              disabled={submitting}
+              disabled={submitting || !isAuthorized}
             >
               {submitting ? <CircularProgress size={24} /> : 'Submit'}
             </Button>
