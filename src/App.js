@@ -230,7 +230,7 @@ const CLIENT_ID = '951840937495-47jfc42fiit1031u1a9kp70o2v4sftei.apps.googleuser
 const API_KEY = 'AIzaSyDdlWa9ZHEIFJ_rmZAlZkvEEdCP96x3FdQ'; // Replace with your API key
 
 const DISCOVERY_DOC = 'https://sheets.googleapis.com/$discovery/rest?version=v4';
-const SCOPES = 'https://www.googleapis.com/auth/spreadsheets.readonly';
+const SCOPES = 'https://www.googleapis.com/auth/spreadsheets';
 
 const App = () => {
   const [idNo, setIdNo] = useState('');
@@ -335,6 +335,8 @@ const App = () => {
 
       if (response.status === 200) {
         alert('Data submitted successfully!');
+        //reload the window
+        window.location.reload();
       } else {
         throw new Error('Error submitting data.');
       }
